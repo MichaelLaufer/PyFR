@@ -42,9 +42,10 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Base output directory and file name
         basedir = self.cfg.getpath(self.cfgsect, 'basedir', '.', abs=True)
         basename = self.cfg.get(self.cfgsect, 'basename')
+        ftype = self.cfg.get(self.cfgsect, 'ftype', "HDF5")
 
         # Construct the file writer
-        self._writer = NativeWriter(intg, basedir, basename, 'tavg')
+        self._writer = NativeWriter(intg, basedir, basename, 'tavg', ftype=ftype)
 
         # Gradient pre-processing
         self._init_gradients(intg)

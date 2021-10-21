@@ -168,22 +168,29 @@ def process_partition(args):
             raise RuntimeError('No partitioners available')
 
     # Partition the mesh
-    mesh, rnum, part_soln_fn = part.partition(NativeReader(args.mesh))
+    mesh, rnum, part_soln_fn = part.partition(NativeReader.get_native_reader(args.mesh))
 
     # Prepare the solutions
-    solnit = (part_soln_fn(NativeReader(s)) for s in args.solns)
+    solnit = (part_soln_fn(NativeReader.get_native_reader(s)) for s in args.solns)
+    
+    # Output mesh
+    mesh_path = os.path.join(args.outd, os.path.basename(args.mesh.rstrip('/')))
+    write_pyfrms(mesh_path, mesh)
 
-    # Output paths/files
-    paths = it.chain([args.mesh], args.solns)
-    files = it.chain([mesh], solnit)
+    # Iterate over the output solutions
+    paths = it.chain(args.solns)
+    files = it.chain(solnit)
 
-    # Iterate over the output mesh/solutions
     for path, data in zip(paths, files):
         # Compute the output path
         path = os.path.join(args.outd, os.path.basename(path.rstrip('/')))
 
         # Save to disk
-        write_pyfrms(path, data)
+        if os.path.isdir(args.solns[0]):
+            ftype = "ADIOS2"
+        else:
+            ftype = "HDF5"
+        write_pyfrms(path, data, ftype=ftype)
 
     # Write out the renumbering table
     if args.rnumf:
@@ -248,13 +255,13 @@ def _process_common(args, mesh, soln, cfg):
 
 def process_run(args):
     _process_common(
-        args, NativeReader(args.mesh), None, Inifile.load(args.cfg)
+        args, NativeReader.get_native_reader(args.mesh), None, Inifile.load(args.cfg)
     )
 
 
 def process_restart(args):
-    mesh = NativeReader(args.mesh)
-    soln = NativeReader(args.soln)
+    mesh = NativeReader.get_native_reader(args.mesh)
+    soln = NativeReader.get_native_reader(args.soln)
 
     # Ensure the solution is from the mesh we are using
     if soln['mesh_uuid'] != mesh['mesh_uuid']:

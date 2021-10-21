@@ -4,7 +4,7 @@ from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root
 from pyfr.plugins.base import BasePlugin, PostactionMixin, RegionMixin
 from pyfr.writers.native import NativeWriter
-
+import time
 
 class WriterPlugin(PostactionMixin, RegionMixin, BasePlugin):
     name = 'writer'
@@ -17,9 +17,10 @@ class WriterPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Base output directory and file name
         basedir = self.cfg.getpath(self.cfgsect, 'basedir', '.', abs=True)
         basename = self.cfg.get(self.cfgsect, 'basename')
+        ftype = self.cfg.get(self.cfgsect, 'ftype', "HDF5")
 
         # Construct the solution writer
-        self._writer = NativeWriter(intg, basedir, basename, 'soln')
+        self._writer = NativeWriter(intg, basedir, basename, 'soln', ftype=ftype)
 
         # Output time step and last output time
         self.dt_out = self.cfg.getfloat(cfgsect, 'dt-out')
@@ -75,8 +76,10 @@ class WriterPlugin(PostactionMixin, RegionMixin, BasePlugin):
             data[etype] = intg.soln[idx][..., rgn].astype(self.fpdtype)
 
         # Write out the file
+        start = time.time()
         solnfname = self._writer.write(data, intg.tcurr, metadata)
-
+        end = time.time()
+        print("Output solution time: {}".format(end-start))
         # If a post-action has been registered then invoke it
         self._invoke_postaction(intg=intg, mesh=intg.system.mesh.fname,
                                 soln=solnfname, t=intg.tcurr)

@@ -4,23 +4,34 @@ import os
 import re
 
 import h5py
+import adios2
 import numpy as np
 
 from pyfr.mpiutil import get_comm_rank_root
 
-
-def write_pyfrms(path, data):
+def write_pyfrms(path, data, ftype="HDF5"):
     # Save to disk
-    with h5py.File(path, 'w', libver='latest') as f:
-        for k in filter(lambda k: isinstance(k, str), data):
-            f[k] = data[k]
+    if ftype == "HDF5":
+        with h5py.File(path, 'w', libver='latest') as f:
+            for k in filter(lambda k: isinstance(k, str), data):
+                f[k] = data[k]
 
-        for p, q in filter(lambda k: isinstance(k, tuple), data):
-            f[p].attrs[q] = data[p, q]
+            for p, q in filter(lambda k: isinstance(k, tuple), data):
+                f[p].attrs[q] = data[p, q]
+    else:
+        with adios2.open(path, "w") as f:
+            for k in filter(lambda k: isinstance(k, str), data):
+                if (type(data[k]) == str):
+                    f.write(k, data[k])
+                else:
+                    f.write(k, data[k], data[k].shape, np.zeros_like(data[k].shape), data[k].shape)
+                
+            for p, q in filter(lambda k: isinstance(k, tuple), data):
+                f.write_attribute(q, data[p,q], p)
 
 
 class NativeWriter(object):
-    def __init__(self, intg, basedir, basename, prefix, *, extn='.pyfrs'):
+    def __init__(self, intg, basedir, basename, prefix, *, extn='.pyfrs', ftype="HDF5"):
         # Base output directory and file name
         self.basedir = basedir
         self.basename = basename
@@ -41,8 +52,10 @@ class NativeWriter(object):
         # MPI info
         comm, rank, root = get_comm_rank_root()
 
+        if ftype == "ADIOS2":
+            self._write = self._write_adios2
         # Parallel I/O
-        if (h5py.get_config().mpi and
+        elif (h5py.get_config().mpi and
             'PYFR_FORCE_SERIAL_HDF5' not in os.environ):
             self._write = self._write_parallel
         # Serial I/O
@@ -86,12 +99,40 @@ class NativeWriter(object):
 
     def _prepare_data_info(self, data):
         info = {}
-
         for k, v in data.items():
             info[f'{self.prefix}_{k}_p{self.prank}'] = (v.shape, v.dtype.str)
 
         return info
 
+    def _write_adios2(self, path, data, metadata):
+        comm, rank, root = get_comm_rank_root()
+        info = self._prepare_data_info(data)
+
+        # If we are the root rank then process any metadata
+        if rank == root:
+            data = dict(data)
+
+            for k, v in metadata.items():
+                if isinstance(v, str):
+                    #data[k] = np.array(v.encode(), dtype='S')
+                    data[k] = v
+                    info[k] = ((), ())
+                else:
+                    data[k] = v
+                    info[k] = (v.shape, v.dtype.str)
+        elif metadata:
+            raise ValueError('Metadata must be written by the root rank')
+
+        with adios2.open(path, "w", comm) as f:
+            for name, dat in zip(info, data.values()):
+                if (type(dat) == str):
+                    f.write(name, dat)
+                else:
+                    #f.write(name, dat)
+                    f.write(name, dat, dat.shape, np.zeros_like(dat.shape), dat.shape)
+
+        comm.barrier()
+    
     def _write_parallel(self, path, data, metadata):
         comm, rank, root = get_comm_rank_root()
 
@@ -113,13 +154,12 @@ class NativeWriter(object):
 
         # Distribute the data info to all of the ranks
         ginfo = comm.allgather(info)
-
         with h5py.File(path, 'w', driver='mpio', comm=comm) as f:
             # Parallel HDF5 requires that data sets be created collectively
             for minfo in ginfo:
                 for name, (shape, dtype) in minfo.items():
                     f.create_dataset(name, shape, dtype=dtype)
-
+                    
             # Write out our local data
             for name, dat in zip(info, data.values()):
                 fdata = f[name]
@@ -170,7 +210,7 @@ class NativeWriter(object):
                 # Write our local data
                 for k, v in zip(info, data.values()):
                     f[k] = v
-
+                    
                 # Receive and write the remote data
                 for mrank, minfo in enumerate(ginfo):
                     for k, (shape, dtype) in minfo.items():

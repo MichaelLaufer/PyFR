@@ -12,8 +12,8 @@ class BaseWriter(object):
         self.outf = args.outf
 
         # Load the mesh and solution files
-        self.soln = NativeReader(args.solnf)
-        self.mesh = NativeReader(args.meshf)
+        self.soln = NativeReader.get_native_reader(args.solnf)
+        self.mesh = NativeReader.get_native_reader(args.meshf)
 
         # Check solution and mesh are compatible
         if self.mesh['mesh_uuid'] != self.soln['mesh_uuid']:
@@ -30,11 +30,11 @@ class BaseWriter(object):
         # Get element types and array shapes
         self.mesh_inf = self.mesh.array_info('spt')
         self.soln_inf = self.soln.array_info(self.dataprefix)
-
+        
         # Dimensions
         self.ndims = next(iter(self.mesh_inf.values()))[1][2]
         self.nvars = next(iter(self.soln_inf.values()))[1][1]
-
+        
         # System and elements classes
         self.systemscls = subclass_where(
             BaseSystem, name=self.cfg.get('solver', 'system')
